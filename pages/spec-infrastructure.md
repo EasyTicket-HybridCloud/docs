@@ -17,7 +17,7 @@ Hệ thống EasyTicket sử dụng mô hình **Hybrid Cloud** kết hợp giữ
 | Layer | Thành phần | Mô tả |
 |-------|------------|-------|
 | **Client** | Browser, Desktop App | Giao diện người dùng cuối |
-| **CDN & DNS** | Route 53, CloudFront | DNS routing và CDN distribution |
+| **CDN & DNS** | Cloudflare, CloudFront | DNS routing và CDN distribution |
 | **Security** | ACM, WAF | SSL/TLS termination và Web Application Firewall |
 | **Networking** | VPC, Load Balancer | Virtual network và request routing |
 | **Application** | API Gateway, Microservices | Business logic và API endpoints |
@@ -34,7 +34,7 @@ Browser/Desktop App
     ↓
 CloudFront (CDN)
     ↓
-Route 53 (DNS)
+Cloudflare (DNS)
     ↓
 WAF (Security Layer)
     ↓
@@ -101,16 +101,16 @@ Hệ thống AWS được triển khai trong **Virtual Private Cloud (VPC)** v�
     └────────────────────────────────────────────┘
                           │
               ┌───────────┴───────────┐
-              │   Route 53 + CloudFront │
-              │   + ACM + WAF           │
-              └─────────────────────────┘
+              │   Cloudflare + CloudFront │
+              │   + ACM + WAF             │
+              └───────────────────────────┘
 ```
 
 ### AWS Services chi tiết
 
 | Service | Loại | Mục đích |
 |---------|------|----------|
-| **Route 53** | DNS | Quản lý DNS, health checks, routing policies |
+| **Cloudflare** | DNS | Quản lý DNS, DDoS protection, edge security |
 | **CloudFront** | CDN | Edge caching, DDoS protection, low latency |
 | **ACM (Certificate Manager)** | Security | Tự động cấp và renew SSL/TLS certificates |
 | **WAF (Web Application Firewall)** | Security | Bảo vệ against OWASP top 10, rate limiting |
@@ -136,58 +136,73 @@ Hệ thống AWS được triển khai trong **Virtual Private Cloud (VPC)** v�
 
 ### Tổng quan
 
-Môi trường On-Premises sử dụng **Hyper-V virtualization** và **Kubernetes** để deploy và quản lý các microservices, cùng với **Kafka** làm message broker thay vì RabbitMQ.
+Môi trường On-Premises đóng vai trò **Database Hub** cho hệ thống EasyTicket. Các service nghiệp vụ (Auth, Event, Ticket) đã được deploy trên AWS. On-Premises chỉ chịu trách nhiệm:
+- Lưu trữ dữ liệu database chính (PostgreSQL)
+- Cung cấp Backend API gateway để truy cập database từ internal network
+- Đảm bảo High Availability (HA) với failover tự động
 
-### Cấu trúc Hyper-V Cluster
+### Cấu trúc Hyper-V Cluster (HA)
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    Hyper-V Cluster                          │
+│                    Hyper-V Cluster (HA)                     │
+│                                                            │
 │  ┌──────────────────┐    ┌──────────────────┐             │
 │  │   Hyper-V Host 1  │    │   Hyper-V Host 2  │             │
+│  │    (Primary)      │    │    (Secondary)    │             │
+│  │                   │    │                   │             │
 │  │  ┌────────────┐  │    │  ┌────────────┐  │             │
-│  │  │Kubernetes  │  │    │  │Kubernetes  │  │             │
-│  │  │Master VM   │  │    │  │Master VM   │  │             │
+│  │  │ Backend VM │◄─┼────┼──│ Backend VM │  │             │
+│  │  │  (Primary) │  │    │  │ (Standby)  │  │             │
 │  │  └────────────┘  │    │  └────────────┘  │             │
+│  │                   │    │                   │             │
 │  │  ┌────────────┐  │    │  ┌────────────┐  │             │
-│  │  │ Worker VM  │  │    │  │ Worker VM  │  │             │
-│  │  │  (App 1)   │  │    │  │  (App 2)   │  │             │
-│  │  └────────────┘  │    │  └────────────┘  │             │
-│  │  ┌────────────┐  │    │  ┌────────────┐  │             │
-│  │  │ Worker VM  │  │    │  │ Worker VM  │  │             │
-│  │  │  (App 3)   │  │    │  │  (App 4)   │  │             │
+│  │  │ PostgreSQL│◄─┼────┼──│ PostgreSQL│  │             │
+│  │  │   (Primary)│ │    │  │ (Standby) │  │             │
 │  │  └────────────┘  │    │  └────────────┘  │             │
 │  └──────────────────┘    └──────────────────┘             │
+│                                                             │
+│  ┌─────────────────────────────────────────────────────┐    │
+│  │              Shared Storage (SAN/NAS)                 │    │
+│  └─────────────────────────────────────────────────────┘    │
 └─────────────────────────────────────────────────────────────┘
-                          │
-        ┌─────────────────┼─────────────────┐
-        │                 │                 │
-        ▼                 ▼                 ▼
-  ┌──────────┐     ┌──────────┐     ┌──────────┐
-  │PostgreSQL│     │  Redis   │     │  Kafka   │
-  │ Cluster  │     │ Cluster  │     │ Cluster  │
-  └──────────┘     └──────────┘     └──────────┘
+                              │
+        ┌─────────────────────┼─────────────────────┐
+        │                                             │
+        ▼                                             ▼
+  ┌──────────────┐                         ┌──────────────┐
+  │   Internal   │                         │     AWS       │
+  │   Clients    │                         │  (Services)   │
+  └──────────────┘                         └──────────────┘
 ```
 
-### Kubernetes Architecture
+### VM Resources
 
-| Component | Mô tả | Số lượng |
-|-----------|-------|----------|
-| **Master Node** | API Server, etcd, Scheduler, Controller Manager | 3 (HA) |
-| **Worker Node** | Chạy application pods | 3+ |
-| **Ingress Controller** | Nginx-based reverse proxy, SSL termination | 2 |
-| **CSI Driver** | Container Storage Interface | - |
+| VM | Mô tả | VCPU | RAM | Storage |
+|----|-------|------|-----|---------|
+| **Backend VM** | API Gateway - truy cập DB cho internal clients | 4 | 8 GB | 100 GB |
+| **PostgreSQL VM** | Database Primary | 8 | 32 GB | 500 GB |
+
+> **HA Configuration**: Mỗi VM được cấu hình **Active-Passive** trên 2 Hyper-V hosts. Khi Primary host fails, VMs tự động failover sang Secondary host thông qua **Hyper-V Replica** hoặc ** failover clustering**.
+
+### High Availability Design
+
+| Component | Strategy | Failover Time |
+|-----------|----------|---------------|
+| **Hyper-V Hosts** | Hyper-V Failover Clustering | < 30s |
+| **Backend API** | Windows NLB + Health Checks | < 60s |
+| **PostgreSQL** | Streaming Replication (1 Primary + 1 Standby) | < 2min |
+| **Storage** | Shared SAN/NAS với RAID | < 30s |
 
 ### So sánh AWS vs On-Premises
 
 | Thành phần | AWS | On-Premises |
 |------------|-----|-------------|
-| **Compute** | ECS Fargate | Kubernetes on Hyper-V |
-| **Database** | RDS PostgreSQL | PostgreSQL Cluster |
-| **Cache** | ElastiCache Redis | Redis Cluster |
-| **Message Queue** | RabbitMQ | Apache Kafka |
-| **Load Balancer** | ALB | Nginx Ingress |
-| **Storage** | S3 | Local/NFS Storage |
+| **Business Services** | ECS Fargate (Auth, Event, Ticket) | - |
+| **Database** | RDS PostgreSQL (Cloud) | PostgreSQL (On-Prem) |
+| **API Gateway** | API Gateway / ALB | Backend VM |
+| **Cache** | ElastiCache Redis | - |
+| **Storage** | S3 | Local SAN/NAS |
 | **Monitoring** | CloudWatch | Prometheus + Grafana |
 
 ---
