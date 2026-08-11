@@ -115,7 +115,7 @@ Hệ thống AWS được triển khai trong **Virtual Private Cloud (VPC)** v�
 | **ACM (Certificate Manager)** | Security | Tự động cấp và renew SSL/TLS certificates |
 | **WAF (Web Application Firewall)** | Security | Bảo vệ against OWASP top 10, rate limiting |
 | **Application Load Balancer** | Networking | Layer 7 load balancing, path-based routing |
-| **ECS Fargate** | Compute | Serverless container runtime cho microservices |
+| **EKS-ECR** | Compute | Serverless container runtime cho microservices - K8S on AWS Cloud |
 | **RDS PostgreSQL** | Database | Managed PostgreSQL với Multi-AZ replication |
 | **ElastiCache Redis** | Cache | In-memory caching, session store |
 | **S3** | Storage | Object storage cho files, images, backups |
@@ -281,9 +281,9 @@ Hệ thống CI/CD sử dụng **GitHub Actions** với quy trình tự động 
 
 | Target | Infrastructure | Strategy |
 |--------|---------------|----------|
-| **Dev** | AWS ECS Dev Cluster | Rolling update |
-| **Staging** | AWS ECS Staging Cluster | Blue/Green |
-| **Production** | AWS ECS Production Cluster | Blue/Green + Canary |
+| **Dev** | AWS EKS Dev Cluster | Rolling update |
+| **Staging** | AWS EKS Staging Cluster | Blue/Green |
+| **Production** | AWS EKS Production Cluster | Blue/Green + Canary |
 
 ### Rollback Strategy
 
@@ -291,8 +291,8 @@ Hệ thống CI/CD sử dụng **GitHub Actions** với quy trình tự động 
 2. **Manual Rollback**: Via GitHub Actions workflow dispatch
 3. **Rollback Commands**:
    ```bash
-   # ECS Rollback
-   aws ecs update-service --service api --region us-east-1 --force-new-deployment
+   # EKS Rollback
+   aws eks update-service --service api --region us-east-1 --force-new-deployment
    
    # Kubernetes Rollback
    kubectl rollout undo deployment/api -n production
